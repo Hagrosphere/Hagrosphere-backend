@@ -1,0 +1,488 @@
+// Hagrosphere Platform - Prisma Schema
+// Agricultural marketplace connecting farmers, buyers, diaspora investors, and agribusinesses
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  RETIRED
+}
+
+enum EquipmentCondition {
+  NEW
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum JobType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  SEASONAL
+  INTERNSHIP
+}
+
+enum JobStatus {
+  OPEN
+  CLOSED
+  DRAFT
+  PAUSED
+}
+
+enum ApplicationStatus {
+  PENDING
+  REVIEWED
+  SHORTLISTED
+  REJECTED
+  ACCEPTED
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ArticleCategory {
+  FARMING_TIPS
+  MARKET_NEWS
+  TECHNOLOGY
+  POLICY
+  INVESTMENT
+  DIASPORA
+  GENERAL
+}
+
+enum ContactStatus {
+  UNREAD
+  READ
+  REPLIED
+  ARCHIVED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  PUBLISH
+  ARCHIVE
+  SUSPEND
+  ACTIVATE
+  UPLOAD
+  PASSWORD_RESET
+}
+
+// ============================================================
+// USERS & AUTH
+// ============================================================
+
+model User {
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  password              String
+  firstName             String
+  lastName              String
+  role                  UserRole  @default(USER)
+  status                UserStatus @default(PENDING_VERIFICATION)
+  avatar                String?
+  phone                 String?
+  isEmailVerified       Boolean   @default(false)
+  emailVerifyToken      String?   @unique
+  emailVerifyExpires    DateTime?
+  passwordResetToken    String?   @unique
+  passwordResetExpires  DateTime?
+  lastLoginAt           DateTime?
+  lastLoginIp           String?
+  loginAttempts         Int       @default(0)
+  lockoutUntil          DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime? // soft delete
+
+  // Relations
+  refreshTokens   RefreshToken[]
+  auditLogs       AuditLog[]
+  contactMessages ContactMessage[]
+  sessions        UserSession[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceInfo  String?
+  ipAddress   String?
+  userAgent   String?
+  expiresAt   DateTime
+  isRevoked   Boolean   @default(false)
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model UserSession {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceInfo String?
+  ipAddress  String?
+  userAgent  String?
+  lastSeen   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+// ============================================================
+// EQUIPMENT RENTAL
+// ============================================================
+
+model EquipmentCategory {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  slug        String      @unique
+  description String?
+  iconUrl     String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  equipment   Equipment[]
+
+  @@index([slug])
+  @@map("equipment_categories")
+}
+
+model Equipment {
+  id            String             @id @default(cuid())
+  name          String
+  slug          String             @unique
+  description   String
+  pricePerDay   Decimal            @db.Decimal(12, 2)
+  pricePerWeek  Decimal?           @db.Decimal(12, 2)
+  pricePerMonth Decimal?           @db.Decimal(12, 2)
+  currency      String             @default("NGN")
+  status        EquipmentStatus    @default(AVAILABLE)
+  condition     EquipmentCondition @default(GOOD)
+  location      String
+  state         String?
+  brand         String?
+  model         String?
+  yearOfMake    Int?
+  specifications Json?             // flexible spec fields
+  features      String[]
+  images        EquipmentImage[]
+  categoryId    String
+  category      EquipmentCategory  @relation(fields: [categoryId], references: [id])
+  isFeatured    Boolean            @default(false)
+  viewCount     Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  deletedAt     DateTime?          // soft delete
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([isFeatured])
+  @@index([location])
+  @@index([pricePerDay])
+  @@index([deletedAt])
+  @@map("equipment")
+}
+
+model EquipmentImage {
+  id          String    @id @default(cuid())
+  url         String
+  publicId    String?   // cloud storage reference
+  altText     String?
+  isPrimary   Boolean   @default(false)
+  order       Int       @default(0)
+  equipmentId String
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([equipmentId])
+  @@map("equipment_images")
+}
+
+// ============================================================
+// JOBS BOARD
+// ============================================================
+
+model JobCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  jobs        Job[]
+
+  @@index([slug])
+  @@map("job_categories")
+}
+
+model Job {
+  id              String     @id @default(cuid())
+  title           String
+  slug            String     @unique
+  company         String
+  companyLogo     String?
+  location        String
+  state           String?
+  isRemote        Boolean    @default(false)
+  type            JobType    @default(FULL_TIME)
+  status          JobStatus  @default(OPEN)
+  description     String     @db.Text
+  requirements    String?    @db.Text
+  responsibilities String?   @db.Text
+  salaryMin       Decimal?   @db.Decimal(12, 2)
+  salaryMax       Decimal?   @db.Decimal(12, 2)
+  currency        String     @default("NGN")
+  isSalaryVisible Boolean    @default(true)
+  experience      String?    // e.g. "2-3 years"
+  skills          String[]
+  benefits        String[]
+  categoryId      String
+  category        JobCategory @relation(fields: [categoryId], references: [id])
+  isFeatured      Boolean    @default(false)
+  viewCount       Int        @default(0)
+  applicationUrl  String?
+  applicationEmail String?
+  deadline        DateTime?
+  publishedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?  // soft delete
+  applications    JobApplication[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([type])
+  @@index([isFeatured])
+  @@index([deadline])
+  @@index([deletedAt])
+  @@map("jobs")
+}
+
+model JobApplication {
+  id              String            @id @default(cuid())
+  jobId           String
+  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  fullName        String
+  email           String
+  phone           String
+  currentLocation String
+  yearsExperience Int
+  availability    String
+  coverLetter     String            @db.Text
+  status          ApplicationStatus @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([jobId])
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+  @@map("job_applications")
+}
+
+// ============================================================
+// ARTICLES / LEARN CONTENT
+// ============================================================
+
+model ArticleTag {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  slug     String    @unique
+  articles Article[] @relation("ArticleToTag")
+
+  @@index([slug])
+  @@map("article_tags")
+}
+
+model Article {
+  id           String          @id @default(cuid())
+  title        String
+  slug         String          @unique
+  excerpt      String?
+  content      String          @db.Text
+  coverImage   String?
+  coverImageId String?         // cloud storage reference
+  category     ArticleCategory @default(GENERAL)
+  status       ArticleStatus   @default(DRAFT)
+  isFeatured   Boolean         @default(false)
+  viewCount    Int             @default(0)
+  readTime     Int?            // minutes
+  author       String          @default("Hagrosphere Team")
+  tags         ArticleTag[]    @relation("ArticleToTag")
+  publishedAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deletedAt    DateTime?       // soft delete
+
+  @@index([status])
+  @@index([category])
+  @@index([isFeatured])
+  @@index([publishedAt])
+  @@index([deletedAt])
+  @@map("articles")
+}
+
+// ============================================================
+// CONTACT / INQUIRIES
+// ============================================================
+
+model ContactMessage {
+  id        String        @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String        @db.Text
+  status    ContactStatus @default(UNREAD)
+  ipAddress String?
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id])
+  repliedAt DateTime?
+  replyNote String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([status])
+  @@index([email])
+  @@index([createdAt])
+  @@map("contact_messages")
+}
+
+// ============================================================
+// FILE UPLOADS
+// ============================================================
+
+model FileUpload {
+  id           String   @id @default(cuid())
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int      // bytes
+  url          String
+  publicId     String?  // cloud storage reference
+  bucket       String?
+  folder       String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([uploadedById])
+  @@index([mimeType])
+  @@map("file_uploads")
+}
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+
+model AuditLog {
+  id           String      @id @default(cuid())
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id])
+  action       AuditAction
+  resourceType String      // "equipment", "job", "article", etc.
+  resourceId   String?
+  description  String
+  metadata     Json?       // extra context
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime    @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// SITE SETTINGS
+// ============================================================
+
+model SiteSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  type      String   @default("string") // string, json, boolean, number
+  label     String?
+  group     String?  // "general", "email", "social", etc.
+  updatedAt DateTime @updatedAt
+
+  @@index([group])
+  @@map("site_settings")
+}
+
+// ============================================================
+// NEWSLETTER / SUBSCRIPTIONS
+// ============================================================
+
+model NewsletterSubscriber {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  isActive    Boolean   @default(true)
+  confirmedAt DateTime?
+  token       String?   @unique
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@map("newsletter_subscribers")
+}
+
+// ============================================================
+// DASHBOARD STATS (Materialized/cached for performance)
+// ============================================================
+
+model DashboardStat {
+  id        String   @id @default(cuid())
+  key       String   @unique // "total_users", "total_equipment", etc.
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("dashboard_stats")
+}
