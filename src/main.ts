@@ -31,10 +31,13 @@ async function bootstrap() {
   app.use(compression());
 
   // ── CORS ──────────────────────────────────────────────────
+  const allowedOrigins = configService
+    .get<string>('ALLOWED_ORIGINS', 'http://localhost:5173')
+    .split(',')
+    .map(origin => origin.trim());
+
   app.enableCors({
-    origin: configService
-      .get<string>('ALLOWED_ORIGINS', 'http://localhost:5173')
-      .split(','),
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
