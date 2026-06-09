@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ApplicationStatus } from '@prisma/client';
 import slugify from 'slugify';
 
 import { PrismaService } from '../../database/prisma.service';
@@ -258,5 +258,59 @@ export class JobsService {
       slug = `${base}-${counter++}`;
     }
     return slug;
+  }
+
+  // ── Job Applications ──────────────────────────────────────────────────────
+
+  async getApplications(query: { page?: number; limit?: number; status?: ApplicationStatus; jobId?: string }) {
+    const { page = 1, limit = 20, status, jobId } = query;
+
+    const where: Prisma.JobApplicationWhereInput = {
+      ...(status && { status }),
+      ...(jobId && { jobId }),
+    };
+
+    const skip = (page - 1) * limit;
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.jobApplication.count({ where }),
+      this.prisma.jobApplication.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          job: {
+            select: { id: true, title: true, company: true, slug: true },
+          },
+        },
+      }),
+    ]);
+
+    return { data, meta: buildPaginationMeta(total, page, limit) };
+  }
+
+  async getApplicationById(id: string) {
+    const application = await this.prisma.jobApplication.findUnique({
+      where: { id },
+      include: {
+        job: true,
+      },
+    });
+
+    if (!application) {
+      throw new NotFoundException('Application not found');
+    }
+
+    return application;
+  }
+
+  async updateApplicationStatus(id: string, status: ApplicationStatus) {
+    const application = await this.prisma.jobApplication.update({
+      where: { id },
+      data: { status },
+    });
+
+    return application;
   }
 }

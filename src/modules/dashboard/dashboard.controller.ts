@@ -17,7 +17,8 @@ export class DashboardController {
   @Get('overview')
   @ApiOperation({ summary: 'Admin: Get dashboard overview stats and charts' })
   async getOverview() {
-    return this.dashboardService.getOverview();
+    const data = await this.dashboardService.getOverview();
+    return { data };
   }
 
   @Get('activity')

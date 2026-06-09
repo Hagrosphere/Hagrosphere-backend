@@ -10,13 +10,16 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApplicationStatus } from '@prisma/client';
 
 import { EquipmentService } from './equipment.service';
 import { CreateEquipmentDto } from './dto/create-equipment.dto';
 import { UpdateEquipmentDto } from './dto/update-equipment.dto';
 import { EquipmentQueryDto } from './dto/equipment-query.dto';
+import { SubmitEquipmentInquiryDto } from './dto/submit-equipment-inquiry.dto';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -43,6 +46,56 @@ export class EquipmentController {
   @ApiOperation({ summary: 'List equipment categories' })
   async getCategories() {
     return this.equipmentService.getCategories();
+  }
+
+  // ── Equipment Inquiries ─────────────────────────────────────
+
+  @Public()
+  @Post(':id/inquire')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Submit equipment inquiry' })
+  async submitInquiry(
+    @Param('id') equipmentId: string,
+    @Body() dto: SubmitEquipmentInquiryDto,
+  ) {
+    return this.equipmentService.submitInquiry(equipmentId, dto);
+  }
+
+  @Get('admin/inquiries/all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Get all equipment inquiries' })
+  async getInquiries(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+    @Query('equipmentId') equipmentId?: string,
+  ) {
+    const validStatus = status ? this.validateStatus(status) : undefined;
+    return this.equipmentService.getInquiries({ page, limit, status: validStatus, equipmentId });
+  }
+
+  @Get('admin/inquiries/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Get inquiry by ID' })
+  async getInquiryById(@Param('id') id: string) {
+    return this.equipmentService.getInquiryById(id);
+  }
+
+  @Patch('admin/inquiries/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Update inquiry status' })
+  async updateInquiryStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+  ) {
+    const validStatus = this.validateStatus(status);
+    return this.equipmentService.updateInquiryStatus(id, validStatus);
   }
 
   @Public()
@@ -90,5 +143,13 @@ export class EquipmentController {
     @CurrentUser('id') adminId: string,
   ) {
     return this.equipmentService.remove(id, adminId);
+  }
+
+  private validateStatus(status: string): ApplicationStatus {
+    const validStatuses: ApplicationStatus[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'REJECTED', 'ACCEPTED'];
+    if (!validStatuses.includes(status as ApplicationStatus)) {
+      throw new BadRequestException('Invalid status');
+    }
+    return status as ApplicationStatus;
   }
 }

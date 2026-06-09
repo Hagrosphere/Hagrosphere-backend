@@ -27,6 +27,7 @@ export class DashboardService {
       recentEquipment,
       recentJobs,
       recentArticles,
+      recentContactMessages,
     ] = await Promise.all([
       this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.user.count({ where: { createdAt: { gte: startOfMonth }, deletedAt: null } }),
@@ -62,6 +63,11 @@ export class DashboardService {
         take: 5,
         select: { id: true, title: true, status: true, viewCount: true, createdAt: true },
       }),
+      this.prisma.contactMessage.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: { id: true, name: true, email: true, subject: true, message: true, status: true, createdAt: true },
+      }),
     ]);
 
     const userGrowth = await this.getUserGrowthLast6Months();
@@ -83,7 +89,7 @@ export class DashboardService {
         userGrowth,
         contentBreakdown: { articles: totalArticles, jobs: totalJobs, equipment: totalEquipment },
       },
-      recent: { users: recentUsers, equipment: recentEquipment, jobs: recentJobs, articles: recentArticles },
+      recent: { users: recentUsers, equipment: recentEquipment, jobs: recentJobs, articles: recentArticles, contactMessages: recentContactMessages },
     };
   }
 

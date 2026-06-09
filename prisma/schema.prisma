@@ -217,6 +217,7 @@ model Equipment {
   category      EquipmentCategory  @relation(fields: [categoryId], references: [id])
   isFeatured    Boolean            @default(false)
   viewCount     Int                @default(0)
+  inquiries     EquipmentInquiry[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
   deletedAt     DateTime?          // soft delete
@@ -243,6 +244,28 @@ model EquipmentImage {
 
   @@index([equipmentId])
   @@map("equipment_images")
+}
+
+model EquipmentInquiry {
+  id                String            @id @default(cuid())
+  equipmentId       String
+  equipment         Equipment         @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  fullName          String
+  email             String
+  phone             String
+  currentLocation   String
+  farmSize          String?
+  usageDuration     String?
+  additionalDetails String?           @db.Text
+  status            ApplicationStatus @default(PENDING)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([equipmentId])
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+  @@map("equipment_inquiries")
 }
 
 // ============================================================

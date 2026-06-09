@@ -2,8 +2,9 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ApplicationStatus } from '@prisma/client';
 import slugify from 'slugify';
 
 import { PrismaService } from '../../database/prisma.service';
@@ -11,6 +12,7 @@ import { AuditService } from '../shared/audit.service';
 import { CreateEquipmentDto } from './dto/create-equipment.dto';
 import { UpdateEquipmentDto } from './dto/update-equipment.dto';
 import { EquipmentQueryDto } from './dto/equipment-query.dto';
+import { SubmitEquipmentInquiryDto } from './dto/submit-equipment-inquiry.dto';
 import { buildPaginationMeta, PaginationMeta } from '../../shared/utils/pagination.util';
 
 @Injectable()
@@ -243,5 +245,93 @@ export class EquipmentService {
     }
 
     return slug;
+  }
+
+  // ── Equipment Inquiries ───────────────────────────────────
+
+  async submitInquiry(equipmentId: string, dto: SubmitEquipmentInquiryDto) {
+    const equipment = await this.prisma.equipment.findFirst({
+      where: { id: equipmentId, deletedAt: null },
+    });
+
+    if (!equipment) {
+      throw new NotFoundException('Equipment not found');
+    }
+
+    if (equipment.status !== 'AVAILABLE') {
+      throw new BadRequestException('Equipment is not currently available');
+    }
+
+    const inquiry = await this.prisma.equipmentInquiry.create({
+      data: {
+        equipmentId,
+        fullName: dto.fullName,
+        email: dto.email,
+        phone: dto.phone,
+        currentLocation: dto.currentLocation,
+        farmSize: dto.farmSize,
+        usageDuration: dto.usageDuration,
+        additionalDetails: dto.additionalDetails,
+      },
+    });
+
+    return {
+      message: 'Inquiry submitted successfully',
+      inquiryId: inquiry.id,
+    };
+  }
+
+  async getInquiries(query: { page?: number; limit?: number; status?: ApplicationStatus; equipmentId?: string }) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const { status, equipmentId } = query;
+
+    const where: Prisma.EquipmentInquiryWhereInput = {
+      ...(status && { status }),
+      ...(equipmentId && { equipmentId }),
+    };
+
+    const skip = (page - 1) * limit;
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.equipmentInquiry.count({ where }),
+      this.prisma.equipmentInquiry.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          equipment: {
+            select: { id: true, name: true, slug: true, location: true },
+          },
+        },
+      }),
+    ]);
+
+    return { data, meta: buildPaginationMeta(total, page, limit) };
+  }
+
+  async getInquiryById(id: string) {
+    const inquiry = await this.prisma.equipmentInquiry.findUnique({
+      where: { id },
+      include: {
+        equipment: true,
+      },
+    });
+
+    if (!inquiry) {
+      throw new NotFoundException('Inquiry not found');
+    }
+
+    return inquiry;
+  }
+
+  async updateInquiryStatus(id: string, status: ApplicationStatus) {
+    const inquiry = await this.prisma.equipmentInquiry.update({
+      where: { id },
+      data: { status },
+    });
+
+    return inquiry;
   }
 }

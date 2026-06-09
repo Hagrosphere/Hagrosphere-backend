@@ -10,8 +10,10 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApplicationStatus } from '@prisma/client';
 
 import { JobsService } from './jobs.service';
 import { CreateJobDto } from './dto/create-job.dto';
@@ -119,5 +121,52 @@ export class JobsController {
     @CurrentUser('id') adminId: string,
   ) {
     return this.jobsService.remove(id, adminId);
+  }
+
+  // ── Job Applications ──────────────────────────────────────
+
+  @Get('admin/applications/all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Get all job applications' })
+  async getApplications(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+    @Query('jobId') jobId?: string,
+  ) {
+    const validStatus = status ? this.validateStatus(status) : undefined;
+    return this.jobsService.getApplications({ page, limit, status: validStatus, jobId });
+  }
+
+  @Get('admin/applications/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Get application by ID' })
+  async getApplicationById(@Param('id') id: string) {
+    return this.jobsService.getApplicationById(id);
+  }
+
+  @Patch('admin/applications/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: Update application status' })
+  async updateApplicationStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+  ) {
+    const validStatus = this.validateStatus(status);
+    return this.jobsService.updateApplicationStatus(id, validStatus);
+  }
+
+  private validateStatus(status: string): ApplicationStatus {
+    const validStatuses: ApplicationStatus[] = ['PENDING', 'REVIEWED', 'SHORTLISTED', 'REJECTED', 'ACCEPTED'];
+    if (!validStatuses.includes(status as ApplicationStatus)) {
+      throw new BadRequestException('Invalid status');
+    }
+    return status as ApplicationStatus;
   }
 }
