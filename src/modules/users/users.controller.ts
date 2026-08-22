@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Delete,
   Param,
@@ -19,6 +20,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CreateUserDto } from './dto/create-user.dto';
 
 class UpdateRoleDto {
   @IsEnum(UserRole)
@@ -37,6 +39,17 @@ class UpdateStatusDto {
 @ApiBearerAuth()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Post()
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Super Admin: Create a new admin/user account directly' })
+  async createUser(
+    @Body() dto: CreateUserDto,
+    @CurrentUser('id') adminId: string,
+  ) {
+    return this.usersService.createUser(dto, adminId);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Admin: List all users with filters' })

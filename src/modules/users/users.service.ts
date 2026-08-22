@@ -2,12 +2,14 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { Prisma, UserRole, UserStatus } from '@prisma/client';
+import * as argon2 from 'argon2';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../shared/audit.service';
 import { buildPaginationMeta } from '../../shared/utils/pagination.util';
+import { CreateUserDto } from './dto/create-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -15,6 +17,41 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
+
+  async createUser(dto: CreateUserDto, adminId: string) {
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existing) throw new ConflictException('An account with this email already exists');
+
+    const hashedPassword = await argon2.hash(dto.password, {
+      type: argon2.argon2id,
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    });
+
+    const user = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        password: hashedPassword,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: dto.role,
+        status: 'ACTIVE',
+        isEmailVerified: true,
+      },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, status: true, createdAt: true },
+    });
+
+    await this.auditService.log({
+      userId: adminId,
+      action: 'CREATE',
+      resourceType: 'user',
+      resourceId: user.id,
+      description: `Admin created new ${dto.role} account: ${user.email}`,
+    });
+
+    return user;
+  }
 
   async findAll(query: {
     page?: number;

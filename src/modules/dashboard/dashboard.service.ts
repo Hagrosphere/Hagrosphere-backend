@@ -10,66 +10,66 @@ export class DashboardService {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
 
-    const [
-      totalUsers,
-      usersThisMonth,
-      usersLastMonth,
-      totalEquipment,
-      availableEquipment,
-      totalJobs,
-      openJobs,
-      totalArticles,
-      publishedArticles,
-      unreadMessages,
-      recentUsers,
-      recentEquipment,
-      recentJobs,
-      recentArticles,
-      recentContactMessages,
-    ] = await Promise.all([
-      this.prisma.user.count({ where: { deletedAt: null } }),
-      this.prisma.user.count({ where: { createdAt: { gte: startOfMonth }, deletedAt: null } }),
-      this.prisma.user.count({ where: { createdAt: { gte: startOfLastMonth, lte: endOfLastMonth }, deletedAt: null } }),
-      this.prisma.equipment.count({ where: { deletedAt: null } }),
-      this.prisma.equipment.count({ where: { status: 'AVAILABLE', deletedAt: null } }),
-      this.prisma.job.count({ where: { deletedAt: null } }),
-      this.prisma.job.count({ where: { status: 'OPEN', deletedAt: null } }),
-      this.prisma.article.count({ where: { deletedAt: null } }),
-      this.prisma.article.count({ where: { status: 'PUBLISHED', deletedAt: null } }),
-      this.prisma.contactMessage.count({ where: { status: 'UNREAD' } }),
-      this.prisma.user.findMany({
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        select: { id: true, email: true, firstName: true, lastName: true, role: true, createdAt: true, status: true },
-      }),
-      this.prisma.equipment.findMany({
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        include: { category: { select: { name: true } }, images: { where: { isPrimary: true }, take: 1 } },
-      }),
-      this.prisma.job.findMany({
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        include: { category: { select: { name: true } } },
-      }),
-      this.prisma.article.findMany({
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        select: { id: true, title: true, status: true, viewCount: true, createdAt: true },
-      }),
-      this.prisma.contactMessage.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: { id: true, name: true, email: true, subject: true, message: true, status: true, createdAt: true },
-      }),
-    ]);
+    // Single query for all counts — uses 1 connection instead of 10
+    const [counts] = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE "deletedAt" IS NULL)::int AS "totalUsers",
+        (SELECT COUNT(*) FROM users WHERE "createdAt" >= ${startOfMonth} AND "deletedAt" IS NULL)::int AS "usersThisMonth",
+        (SELECT COUNT(*) FROM users WHERE "createdAt" >= ${startOfLastMonth} AND "createdAt" <= ${endOfLastMonth} AND "deletedAt" IS NULL)::int AS "usersLastMonth",
+        (SELECT COUNT(*) FROM equipment WHERE "deletedAt" IS NULL)::int AS "totalEquipment",
+        (SELECT COUNT(*) FROM equipment WHERE status = 'AVAILABLE' AND "deletedAt" IS NULL)::int AS "availableEquipment",
+        (SELECT COUNT(*) FROM jobs WHERE "deletedAt" IS NULL)::int AS "totalJobs",
+        (SELECT COUNT(*) FROM jobs WHERE status = 'OPEN' AND "deletedAt" IS NULL)::int AS "openJobs",
+        (SELECT COUNT(*) FROM articles WHERE "deletedAt" IS NULL)::int AS "totalArticles",
+        (SELECT COUNT(*) FROM articles WHERE status = 'PUBLISHED' AND "deletedAt" IS NULL)::int AS "publishedArticles",
+        (SELECT COUNT(*) FROM contact_messages WHERE status = 'UNREAD')::int AS "unreadMessages"
+    `;
 
+    const totalUsers = counts.totalUsers;
+    const usersThisMonth = counts.usersThisMonth;
+    const usersLastMonth = counts.usersLastMonth;
+    const totalEquipment = counts.totalEquipment;
+    const availableEquipment = counts.availableEquipment;
+    const totalJobs = counts.totalJobs;
+    const openJobs = counts.openJobs;
+    const totalArticles = counts.totalArticles;
+    const publishedArticles = counts.publishedArticles;
+    const unreadMessages = counts.unreadMessages;
+
+    // Batch 2: recent records (5 queries, sequential-friendly)
+    const recentUsers = await this.prisma.user.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, createdAt: true, status: true },
+    });
+    const recentEquipment = await this.prisma.equipment.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { category: { select: { name: true } }, images: { where: { isPrimary: true }, take: 1 } },
+    });
+    const recentJobs = await this.prisma.job.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { category: { select: { name: true } } },
+    });
+    const recentArticles = await this.prisma.article.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { id: true, title: true, status: true, viewCount: true, createdAt: true },
+    });
+    const recentContactMessages = await this.prisma.contactMessage.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { id: true, name: true, email: true, subject: true, message: true, status: true, createdAt: true },
+    });
+
+    // Batch 3: growth chart (sequential)
     const userGrowth = await this.getUserGrowthLast6Months();
 
     const usersGrowthPct =
@@ -116,16 +116,16 @@ export class DashboardService {
       return { year: d.getFullYear(), month: d.getMonth() + 1 };
     }).reverse();
 
-    return Promise.all(
-      months.map(async ({ year, month }) => {
-        const start = new Date(year, month - 1, 1);
-        const end = new Date(year, month, 0, 23, 59, 59);
-        const count = await this.prisma.user.count({
-          where: { createdAt: { gte: start, lte: end }, deletedAt: null },
-        });
-        return { label: start.toLocaleString('default', { month: 'short', year: '2-digit' }), users: count };
-      }),
-    );
+    const result = [];
+    for (const { year, month } of months) {
+      const start = new Date(year, month - 1, 1);
+      const end = new Date(year, month, 0, 23, 59, 59);
+      const count = await this.prisma.user.count({
+        where: { createdAt: { gte: start, lte: end }, deletedAt: null },
+      });
+      result.push({ label: start.toLocaleString('default', { month: 'short', year: '2-digit' }), users: count });
+    }
+    return result;
   }
 
   @Cron(CronExpression.EVERY_HOUR)
