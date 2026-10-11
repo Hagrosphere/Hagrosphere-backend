@@ -176,7 +176,7 @@ export class AuthService {
       },
     });
 
-    const tokens = await this.tokenService.generateTokenPair(
+    const { accessToken, refreshToken } = await this.tokenService.generateTokenPair(
       user.id,
       user.role,
       ipAddress,
@@ -202,7 +202,8 @@ export class AuthService {
         role: user.role,
         avatar: user.avatar,
       },
-      ...tokens,
+      accessToken,
+      refreshToken,
     };
   }
 

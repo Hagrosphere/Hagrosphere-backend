@@ -9,7 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Query,
-  Version,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -89,7 +89,7 @@ export class AuthController {
     const refreshToken = req.cookies?.['refresh_token'] as string | undefined;
 
     if (!refreshToken) {
-      return { message: 'No refresh token' };
+      throw new UnauthorizedException('No refresh token');
     }
 
     const result = await this.authService.refreshTokens(refreshToken, req.ip);
@@ -110,11 +110,11 @@ export class AuthController {
   ) {
     const refreshToken = req.cookies?.['refresh_token'] as string;
     
-    // Clear cookie with the same options as when it was set
+    const isProd = process.env.NODE_ENV === 'production';
     res.clearCookie('refresh_token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
       path: '/api/v1/auth/refresh',
     });
     
@@ -157,11 +157,12 @@ export class AuthController {
   // ── Private helpers ───────────────────────────────────────
 
   private setRefreshTokenCookie(res: Response, token: string) {
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie('refresh_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',  // 'none' required for cross-origin in prod
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/api/v1/auth/refresh',
     });
   }

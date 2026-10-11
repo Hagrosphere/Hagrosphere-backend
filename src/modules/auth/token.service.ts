@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
@@ -35,7 +35,7 @@ export class TokenService {
       { sub: userId, role, type: 'access', jti },
       {
         secret: this.configService.get<string>('jwt.accessSecret'),
-        expiresIn: this.configService.get<string>('jwt.accessExpiresIn', '15m'),
+        expiresIn: this.configService.get<string>('jwt.accessExpiresIn', '15m') as JwtSignOptions['expiresIn'],
       },
     );
 
@@ -43,7 +43,7 @@ export class TokenService {
       { sub: userId, role, type: 'refresh', jti },
       {
         secret: this.configService.get<string>('jwt.refreshSecret'),
-        expiresIn: this.configService.get<string>('jwt.refreshExpiresIn', '7d'),
+        expiresIn: this.configService.get<string>('jwt.refreshExpiresIn', '7d') as JwtSignOptions['expiresIn'],
       },
     );
 
@@ -56,7 +56,7 @@ export class TokenService {
       .update(refreshToken)
       .digest('hex');
 
-    await this.prisma.refreshToken.create({
+    const newRecord = await this.prisma.refreshToken.create({
       data: {
         token: tokenHash,
         userId,
@@ -66,8 +66,10 @@ export class TokenService {
       },
     });
 
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken, newTokenId: newRecord.id };
   }
+
+  private readonly GRACE_WINDOW_MS = 20_000; // 20 seconds
 
   async rotateRefreshToken(rawRefreshToken: string, ipAddress?: string) {
     let payload: JwtPayload;
@@ -94,28 +96,88 @@ export class TokenService {
       include: { user: { select: { id: true, role: true, status: true } } },
     });
 
-    if (!stored || stored.isRevoked || stored.expiresAt < new Date()) {
-      // Possible token reuse — revoke all tokens for this user (security!)
-      await this.revokeAllUserTokens(payload.sub);
+    if (!stored) {
       throw new UnauthorizedException('Refresh token invalid or expired');
+    }
+
+    if (stored.isRevoked) {
+      const revokedMs = stored.revokedAt ? Date.now() - stored.revokedAt.getTime() : Infinity;
+
+      if (revokedMs <= this.GRACE_WINDOW_MS && stored.replacedByTokenId) {
+        // Within grace window: likely a duplicate network request after rotation.
+        // Look up the exact replacement token recorded at rotation time.
+        const replacement = await this.prisma.refreshToken.findUnique({
+          where: { id: stored.replacedByTokenId },
+          include: { user: { select: { id: true, role: true, status: true } } },
+        });
+        if (replacement && !replacement.isRevoked && replacement.expiresAt > new Date()) {
+          // Rotate the replacement so the client receives a fresh token pair.
+          const { accessToken, refreshToken, newTokenId } = await this.generateTokenPair(
+            replacement.userId,
+            replacement.user.role,
+            ipAddress,
+            replacement.userAgent ?? undefined,
+          );
+          await this.prisma.refreshToken.update({
+            where: { id: replacement.id },
+            data: { isRevoked: true, revokedAt: new Date(), replacedByTokenId: newTokenId },
+          });
+          return { accessToken, refreshToken };
+        }
+      }
+
+      // Outside grace window or no valid replacement — genuine reuse detected.
+      // Revoke only the forward chain from this token; leave other sessions untouched.
+      await this.revokeChain(stored.id);
+      throw new UnauthorizedException('Refresh token reuse detected');
+    }
+
+    if (stored.expiresAt < new Date()) {
+      throw new UnauthorizedException('Refresh token expired');
     }
 
     if (stored.user.status === 'SUSPENDED' || stored.user.status === 'INACTIVE') {
       throw new UnauthorizedException('Account is not active');
     }
 
-    // Rotate: revoke old, issue new
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { isRevoked: true, revokedAt: new Date() },
-    });
-
-    return this.generateTokenPair(
+    // Normal rotation: issue a new pair, then mark the old token revoked with a pointer to its replacement.
+    const { accessToken, refreshToken, newTokenId } = await this.generateTokenPair(
       stored.userId,
       stored.user.role,
       ipAddress,
       stored.userAgent ?? undefined,
     );
+
+    await this.prisma.refreshToken.update({
+      where: { id: stored.id },
+      data: { isRevoked: true, revokedAt: new Date(), replacedByTokenId: newTokenId },
+    });
+
+    return { accessToken, refreshToken };
+  }
+
+  // Follow replacedByTokenId forward from startId and revoke every token in that chain.
+  // Stops when a token has no replacement or the chain exceeds 20 hops (safety cap).
+  private async revokeChain(startId: string): Promise<void> {
+    let currentId: string | null = startId;
+    let hops = 0;
+    const MAX_HOPS = 20;
+
+    while (currentId && hops < MAX_HOPS) {
+      const record: { id: string; isRevoked: boolean; replacedByTokenId: string | null } | null = await this.prisma.refreshToken.findUnique({
+        where: { id: currentId },
+        select: { id: true, isRevoked: true, replacedByTokenId: true },
+      });
+      if (!record) break;
+      if (!record.isRevoked) {
+        await this.prisma.refreshToken.update({
+          where: { id: record.id },
+          data: { isRevoked: true, revokedAt: new Date() },
+        });
+      }
+      currentId = record.replacedByTokenId;
+      hops++;
+    }
   }
 
   async revokeRefreshToken(rawRefreshToken: string) {

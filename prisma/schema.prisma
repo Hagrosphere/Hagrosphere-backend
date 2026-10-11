@@ -144,21 +144,25 @@ model User {
 }
 
 model RefreshToken {
-  id          String    @id @default(cuid())
-  token       String    @unique
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deviceInfo  String?
-  ipAddress   String?
-  userAgent   String?
-  expiresAt   DateTime
-  isRevoked   Boolean   @default(false)
-  revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  id                 String         @id @default(cuid())
+  token              String         @unique
+  userId             String
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceInfo         String?
+  ipAddress          String?
+  userAgent          String?
+  expiresAt          DateTime
+  isRevoked          Boolean        @default(false)
+  revokedAt          DateTime?
+  replacedByTokenId  String?        @unique // id of the token issued when this one was rotated
+  replacedBy         RefreshToken?  @relation("TokenChain", fields: [replacedByTokenId], references: [id])
+  replaces           RefreshToken?  @relation("TokenChain")
+  createdAt          DateTime       @default(now())
 
   @@index([userId])
   @@index([token])
   @@index([expiresAt])
+  @@index([replacedByTokenId])
   @@map("refresh_tokens")
 }
 
